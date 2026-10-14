@@ -1,4 +1,10 @@
 import type { Hero, LocationId, Npc, ScenarioId } from "./types";
+export const ENERGY_COST = {
+  skill: 8,
+  heal: 6,
+  cleanse: 12,
+  convert: 6,
+} as const;
 export const RULES_VERSION = "0.1.0" as const;
 export const LOCATIONS: Record<
   LocationId,
@@ -22,10 +28,23 @@ export const LOCATIONS: Record<
   throne: {
     name: "荆棘王座",
     subtitle: "THE THORN THRONE",
-    description:
-      "高窗投下最后的天光。王冠之下，一个古老的意志正在等待新的容器。",
+    description: "天光穿过高窗。王冠之下，一个古老的意志正在等待新的容器。",
     x: 68,
     y: 33,
+  },
+  smithy: {
+    name: "铁匠铺",
+    subtitle: "THE FORGE",
+    description: "炉火映着铁砧。铁匠正在整理一把新打好的铁剑。",
+    x: 10,
+    y: 50,
+  },
+  shop: {
+    name: "商店",
+    subtitle: "THE LITTLE SHOP",
+    description: "柜台上摆着药草。店主抬头看了你一眼，等你开口。",
+    x: 50,
+    y: 50,
   },
   rift: {
     name: "界隙之门",
@@ -159,3 +178,55 @@ export const ITEMS: Record<string, string> = {
   王室印记: "跨剧本道具 · 纪念物，不提供额外属性",
   灵境结晶: "跨剧本道具 · 纪念物，不提供额外属性",
 };
+
+export const WEAPONS: Record<string, { power: number }> = {
+  灰木长弓: { power: 8 },
+  铁剑: { power: 10 },
+  余烬法杖: { power: 11 },
+  旧日盾徽: { power: 6 },
+};
+export const GROUND_ITEMS = [
+  {
+    id: "iron-sword",
+    name: "铁剑",
+    location: "smithy",
+    description: "铁匠为旅者准备的武器 · 拾取后可装备",
+  },
+  {
+    id: "herb",
+    name: "药草",
+    location: "shop",
+    description: "店主赠送的试用装 · 使用恢复 16 生命",
+  },
+] as const;
+export const TOWN_NPCS: Npc[] = [
+  {
+    id: "smith",
+    name: "铁匠 · 布兰",
+    hp: 45,
+    maxHp: 45,
+    attack: 9,
+    defense: 3,
+    location: "smithy",
+    relation: "neutral",
+    corruption: 0,
+    goal: "守好铁匠铺，帮旅者挑选装备。",
+    knowledge: "知道柜台上的铁剑是赠给旅者的，王座的秘密并不清楚。",
+  },
+  {
+    id: "merchant",
+    name: "店主 · 米拉",
+    hp: 28,
+    maxHp: 28,
+    attack: 5,
+    defense: 1,
+    location: "shop",
+    relation: "neutral",
+    corruption: 0,
+    goal: "照顾商店，向旅者介绍药草。",
+    knowledge: "知道药草能恢复生命，也听说书库收藏着古老秘典。没有其他现货。",
+  },
+];
+export function heldWeapon(hero: Hero) {
+  return hero.weapon ?? "拳头";
+}

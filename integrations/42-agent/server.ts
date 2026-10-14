@@ -8,6 +8,7 @@ import { pathToFileURL } from "node:url";
 import type { ModelClient } from "42-agent";
 import { replay } from "../../src/engine/engine";
 import type { HeroId } from "../../src/engine/types";
+import { runTurn } from "./turn";
 import { proposeAction } from "./adapter";
 import { createDeepSeekClient } from "./deepseek";
 
@@ -34,7 +35,10 @@ async function readJson(req: IncomingMessage) {
   >;
 }
 /** Local inference bridge only. It does not own or persist the authoritative game state. */
-export function createLocalAgentServer(model?: ModelClient, modelName = "deepseek-flash") {
+export function createLocalAgentServer(
+  model?: ModelClient,
+  modelName = "deepseek-flash",
+) {
   let busy = false;
   const controllers = new Set<AbortController>();
   const server = createServer(async (req, res) => {
@@ -54,12 +58,15 @@ export function createLocalAgentServer(model?: ModelClient, modelName = "deepsee
         runtime: "42-agent",
         model: model ? modelName : null,
       });
-    if (req.method !== "POST" || req.url !== "/api/agent/advice")
+    if (
+      req.method !== "POST" ||
+      !["/api/agent/advice", "/api/agent/turn"].includes(req.url ?? "")
+    )
       return json(res, 404, { error: "不存在的接口。" });
     if (!req.headers["content-type"]?.startsWith("application/json"))
       return json(res, 415, { error: "需要 JSON 请求。" });
     if (busy)
-      return json(res, 429, { error: "上一条建议仍在生成，请稍后再试。" });
+      return json(res, 429, { error: "上一回合仍在进行，请稍后再试。" });
     busy = true;
     const controller = new AbortController();
     controllers.add(controller);
@@ -68,6 +75,17 @@ export function createLocalAgentServer(model?: ModelClient, modelName = "deepsee
     });
     try {
       const body = await readJson(req);
+      if (!body || typeof body !== "object") throw new Error("请求格式错误。");
+      if (req.url === "/api/agent/turn") {
+        const world = replay(body.replay);
+        const result = await runTurn({
+          world,
+          command: body.command,
+          model,
+          signal: controller.signal,
+        });
+        return json(res, 200, result);
+      }
       if (
         !body ||
         typeof body !== "object" ||
@@ -78,6 +96,8 @@ export function createLocalAgentServer(model?: ModelClient, modelName = "deepsee
       )
         throw new Error("行动意图或角色格式错误。");
       const world = replay(body.replay);
+      if (world.playerId && body.actor !== world.playerId)
+        throw new Error("只能控制自己的角色。");
       const advice = await proposeAction({
         world,
         actor: body.actor as HeroId,

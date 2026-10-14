@@ -22,9 +22,23 @@ export default function Modal({
       if (e.key === "Tab") {
         const elements = Array.from(
           ref.current?.querySelectorAll<HTMLElement>(
-            'button:not(:disabled), input, select, textarea, a[href], [tabindex="0"]',
+            'button:not(:disabled), input:not([type="hidden"]), select, textarea, a[href], summary, [tabindex="0"]',
           ) ?? [],
-        );
+        ).filter((element) => {
+          if (!element.getClientRects().length) return false;
+          // Closed details can still report layout boxes in some browsers.
+          let parent = element.parentElement;
+          while (parent && parent !== ref.current) {
+            if (
+              parent instanceof HTMLDetailsElement &&
+              !parent.open &&
+              parent.querySelector("summary") !== element
+            )
+              return false;
+            parent = parent.parentElement;
+          }
+          return true;
+        });
         const first = elements[0],
           last = elements[elements.length - 1];
         if (!first) {

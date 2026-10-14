@@ -116,7 +116,7 @@ describe("42-agent game boundary", () => {
       model: broken,
     });
     expect(result.mode).toBe("fallback");
-    expect(result.proposal?.source).toBe("fallback");
+    expect(result.proposal).toBeNull();
     expect(world.revision).toBe(0);
   });
   it("honors cancellation and rejects advice after world version changes", async () => {
@@ -135,6 +135,9 @@ describe("42-agent game boundary", () => {
       world,
       actor: "ranger",
       intent: "探索",
+      model: scriptedModel([
+        { name: "propose_action", arguments: { index: 0, reason: "前往书库" } },
+      ]),
     });
     const changed = execute(world, {
       type: "wait",
@@ -166,6 +169,6 @@ describe("42-agent game boundary", () => {
       timeoutMs: 20,
     });
     expect(result.mode).toBe("fallback");
-    expect(result.proposal?.command.expectedRevision).toBe(0);
+    expect(result.proposal).toBeNull();
   });
 });

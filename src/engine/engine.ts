@@ -1,4 +1,9 @@
 import {
+  ENERGY_COST,
+  GROUND_ITEMS,
+  TOWN_NPCS,
+  WEAPONS,
+  heldWeapon,
   INITIAL_HEROES,
   INITIAL_NPCS,
   LOCATIONS,
@@ -31,6 +36,7 @@ function log(
     title,
     text,
     tone,
+    location: w.location,
     ...(formula ? { formula } : {}),
   });
 }
@@ -113,7 +119,14 @@ function kingDies(w: World, killer: string) {
   );
 }
 function finishEnemy(w: World, target: Npc, hero: Hero) {
-  log(w, `${target.name}倒下了`, "战斗结束。小队每人获得 30 经验。", "combat");
+  log(
+    w,
+    `${target.name}倒下了`,
+    w.playerId
+      ? "战斗结束。你获得 30 经验。"
+      : "战斗结束。小队每人获得 30 经验。",
+    "combat",
+  );
   award(w, 30);
   if (target.id === "king") {
     hero.inventory.push("王室印记");
@@ -223,13 +236,184 @@ export function execute(previous: World, command: Command): World {
   );
   const w = structuredClone(previous);
   const h = w.heroes.find((h) => h.id === command.actor);
+  if (w.playerId) {
+    requireRule(command.actor === w.playerId, "只能控制自己的角色。");
+    requireRule(
+      command.type !== "attack" && command.type !== "talk",
+      "请使用当前回合的行动。",
+    );
+    requireRule(command.type !== "begin", "旅程已绑定角色。");
+    requireRule(
+      !w.turn?.queue.length || command.type === "npc_turn",
+      "NPC 尚未结束回合。",
+    );
+  }
   requireRule(
-    h && !h.retired && h.hp > 0,
-    "这个角色无法行动，请选择仍然存活的小队成员。",
+    h && (command.type === "begin" || (!h.retired && h.hp > 0)),
+    w.playerId
+      ? "你的角色已无法行动。"
+      : "这个角色无法行动，请选择仍然存活的小队成员。",
   );
   const hostiles = activeNpcs(w).filter((n) => n.relation === "hostile");
   let cost = 10;
   switch (command.type) {
+    case "begin": {
+      requireRule(
+        !w.playerId && command.actor === "ranger",
+        "只能以艾琳开始自己的旅程。",
+      );
+      w.playerId = h.id;
+      h.weapon =
+        h.inventory.find((item) => Object.hasOwn(WEAPONS, item)) ?? null;
+      h.attack = 4 + (h.level - 1) * 2;
+      w.heroes = [h];
+      w.collected = [];
+      w.npcs.push(...structuredClone(TOWN_NPCS));
+      if (previous.revision === 0) {
+        w.journal = [];
+        log(
+          w,
+          "故事由此展开",
+          "你抵达灰石庭院。王子将在正午行动。先探索这座城，还是直接前往王宫？",
+        );
+      }
+      cost = 0;
+      break;
+    }
+    case "strike": {
+      requireRule(w.playerId, "尚未绑定玩家角色。");
+      const target = activeNpcs(w).find((n) => n.id === command.target);
+      requireRule(
+        target && target.relation !== "ally",
+        "请选择在场且可以攻击的 NPC。",
+      );
+      requireRule(
+        !command.skill || h.energy >= ENERGY_COST.skill,
+        "技能需要 8 点能量。",
+      );
+      if (command.skill) h.energy -= ENERGY_COST.skill;
+      const power = h.attack + (h.weapon ? (WEAPONS[h.weapon]?.power ?? 0) : 0);
+      const die = roll(w),
+        bonus = command.skill ? 6 + h.skillRank * 2 : 0;
+      const damage = Math.max(1, power + die + bonus - target.defense);
+      target.hp = Math.max(0, target.hp - damage);
+      target.relation = "hostile";
+      log(
+        w,
+        command.skill
+          ? `${h.name}施放${SKILLS[h.id]}`
+          : `${h.name}用${heldWeapon(h)}攻击`,
+        `${target.name}受到 ${damage} 点伤害。`,
+        "combat",
+        `${power} 攻击 + ${die} (d6) + ${bonus} 技能 − ${target.defense} 防御 = ${damage}`,
+      );
+      if (!target.hp) finishEnemy(w, target, h);
+      break;
+    }
+    case "say":
+      requireRule(w.playerId, "尚未绑定玩家角色。");
+      requireRule(
+        command.target === "narrator" ||
+          activeNpcs(w).some((n) => n.id === command.target),
+        "交谈对象已不在这里。",
+      );
+      log(w, h.name, command.text.trim(), "dialogue");
+      cost = 1;
+      break;
+    case "equip":
+      requireRule(
+        w.playerId &&
+          (command.weapon === null ||
+            (h.inventory.includes(command.weapon) &&
+              Object.hasOwn(WEAPONS, command.weapon))),
+        "只能装备自己持有的武器。",
+      );
+      h.weapon = command.weapon;
+      log(
+        w,
+        "更换武器",
+        `你现在${h.weapon ? `手持${h.weapon}` : "空手，使用拳头攻击"}。`,
+        "system",
+      );
+      cost = 0;
+      break;
+    case "take": {
+      const item = GROUND_ITEMS.find((i) => i.id === command.item);
+      requireRule(
+        w.playerId &&
+          item &&
+          w.scenario === "crown" &&
+          item.location === w.location &&
+          !w.collected?.includes(item.id),
+        "这个物品已不在这里。",
+      );
+      requireRule(!hostiles.length, "战斗结束后才能拾取物品。");
+      h.inventory.push(item.name);
+      w.collected!.push(item.id);
+      log(w, `拾取${item.name}`, `${item.name}已放入你的行囊。`, "system");
+      cost = 1;
+      break;
+    }
+    case "use": {
+      requireRule(
+        w.playerId &&
+          command.item === "药草" &&
+          h.inventory.includes(command.item),
+        "没有可以使用的药草。",
+      );
+      requireRule(h.hp < h.maxHp, "生命已满。");
+      h.inventory.splice(h.inventory.indexOf(command.item), 1);
+      const amount = Math.min(16, h.maxHp - h.hp);
+      h.hp += amount;
+      log(w, "使用药草", `恢复 ${amount} 点生命。`, "system");
+      cost = 1;
+      break;
+    }
+    case "npc_turn": {
+      requireRule(
+        w.playerId && w.turn?.queue[0] === command.npc,
+        "NPC 回合已结束或顺序不正确。",
+      );
+      const turn = w.turn!;
+      const npc = activeNpcs(w).find((n) => n.id === command.npc);
+      requireRule(command.npc === "narrator" || npc, "NPC 已离开场景。");
+      if (command.choice === "speak")
+        requireRule(
+          !turn.spoken && command.text.trim(),
+          "本轮已经说过话，请行动或结束。",
+        );
+      if (turn.spoken)
+        requireRule(!command.text.trim(), "本轮已经说过话，请直接行动或结束。");
+      if (command.choice === "attack")
+        requireRule(npc?.relation === "hostile", "只有敌对 NPC 可以攻击你。");
+      if (command.text.trim())
+        log(
+          w,
+          `${npc?.name ?? "旁白"}${command.source === "rules" ? " · 规则回应" : ""}`,
+          command.text.trim(),
+          "dialogue",
+        );
+      if (command.choice === "attack" && npc) {
+        const damage = Math.max(1, npc.attack - h.defense);
+        h.hp = Math.max(0, h.hp - damage);
+        log(
+          w,
+          `${npc.name}发动攻击`,
+          `你受到 ${damage} 点伤害${h.hp ? "。" : "，已倒下。旅程到此结束。"}`,
+          "combat",
+          `${npc.attack} 攻击 − ${h.defense} 防御 = ${damage}`,
+        );
+      }
+      turn.steps++;
+      if (command.choice !== "speak" || command.done || turn.spoken) {
+        turn.queue.shift();
+        turn.spoken = false;
+      } else turn.spoken = true;
+      requireRule(turn.steps <= 8, "NPC 回合已达到上限。");
+      if (!h.hp || turn.steps === 8) turn.queue = [];
+      cost = 0;
+      break;
+    }
     case "move":
       requireRule(Object.hasOwn(LOCATIONS, command.destination), "未知地点。");
       requireRule(
@@ -242,8 +426,8 @@ export function execute(previous: World, command: Command): World {
       cost = 30;
       log(
         w,
-        "小队启程",
-        `你们前往${LOCATIONS[w.location].name}，路程需要 30 分钟。`,
+        w.playerId ? "启程" : "小队启程",
+        `${w.playerId ? "你" : "你们"}前往${LOCATIONS[w.location].name}，路程需要 30 分钟。`,
       );
       break;
     case "attack": {
@@ -251,10 +435,10 @@ export function execute(previous: World, command: Command): World {
       requireRule(target, "目标已不在此地，或已被击败。");
       requireRule(target.relation !== "ally", "首版不允许攻击盟友。");
       requireRule(
-        !command.skill || h.energy >= 8,
+        !command.skill || h.energy >= ENERGY_COST.skill,
         "能量不足：技能需要 8 点能量。",
       );
-      if (command.skill) h.energy -= 8;
+      if (command.skill) h.energy -= ENERGY_COST.skill;
       const die = roll(w),
         bonus = command.skill ? 6 + h.skillRank * 2 : 0;
       const damage = Math.max(1, h.attack + die + bonus - target.defense);
@@ -306,8 +490,8 @@ export function execute(previous: World, command: Command): World {
         target && target.hp < target.maxHp,
         "请选择需要治疗的小队成员。",
       );
-      requireRule(h.energy >= 6, "治疗需要 6 点能量。");
-      h.energy -= 6;
+      requireRule(h.energy >= ENERGY_COST.heal, "治疗需要 6 点能量。");
+      h.energy -= ENERGY_COST.heal;
       const amount = Math.min(16, target.maxHp - target.hp);
       target.hp += amount;
       log(
@@ -330,7 +514,7 @@ export function execute(previous: World, command: Command): World {
       log(
         w,
         "发现 · 王座并非死物",
-        "秘典记载：王座每半小时腐蚀其主人。净化需要空缺的王位、秘典知识和 12 点能量。每位队员获得 10 经验。",
+        `秘典记载：王座每半小时腐蚀其主人。净化需要空缺的王位、秘典知识和 12 点能量。${w.playerId ? "你" : "每位队员"}获得 10 经验。`,
         "world",
       );
       break;
@@ -373,7 +557,9 @@ export function execute(previous: World, command: Command): World {
       log(
         w,
         "篝火旁的片刻安宁",
-        "每位队员恢复 20 生命与 12 能量。一小时过去了。",
+        w.playerId
+          ? "你恢复 20 生命与 12 能量。一小时过去了。"
+          : "每位队员恢复 20 生命与 12 能量。一小时过去了。",
         "system",
       );
       break;
@@ -389,7 +575,8 @@ export function execute(previous: World, command: Command): World {
         "需要一个尚未净化、无人占据的王座。",
       );
       requireRule(
-        w.heroes.filter((hero) => !hero.retired && hero.hp > 0).length > 1,
+        w.playerId ||
+          w.heroes.filter((hero) => !hero.retired && hero.hp > 0).length > 1,
         "需要至少一名仍能行动的队友来继续旅程。",
       );
       h.retired = true;
@@ -426,8 +613,8 @@ export function execute(previous: World, command: Command): World {
           w.flags.lore,
         "净化需要：荆棘王座、国王死亡、空缺的王位，以及书库秘典。",
       );
-      requireRule(h.energy >= 12, "净化需要 12 点能量。");
-      h.energy -= 12;
+      requireRule(h.energy >= ENERGY_COST.cleanse, "净化需要 12 点能量。");
+      h.energy -= ENERGY_COST.cleanse;
       w.flags.resolved = true;
       award(w, 30);
       log(
@@ -452,7 +639,7 @@ export function execute(previous: World, command: Command): World {
       requireRule(w.location === "rift", "能量转换需要抵达界隙之门。");
       requireRule(!hostiles.length, "战斗中无法进行能量转换。");
       requireRule(h.energy >= 10, "转换试验需要至少 10 点能量。");
-      h.energy -= 6;
+      h.energy -= ENERGY_COST.convert;
       cost = 0;
       log(
         w,
@@ -477,12 +664,30 @@ export function execute(previous: World, command: Command): World {
       log(
         w,
         "穿越世界边界",
-        `小队进入${w.scenario === "spirit" ? "灵境回廊" : "王座余烬"}。等级与物品保留；每人的当前能量按 70% 转换并向下取整，上限保持不变。`,
+        `${w.playerId ? "你" : "小队"}进入${w.scenario === "spirit" ? "灵境回廊" : "王座余烬"}。等级与物品保留；每人的当前能量按 70% 转换并向下取整，上限保持不变。`,
         "world",
       );
       break;
   }
   advance(w, cost);
+  if (
+    w.playerId &&
+    command.type !== "npc_turn" &&
+    command.type !== "begin" &&
+    h.hp > 0 &&
+    !h.retired
+  ) {
+    const queue = activeNpcs(w).map((n) => n.id);
+    if (command.type === "say" && command.target !== "narrator") {
+      const index = queue.indexOf(command.target);
+      if (index > 0) queue.unshift(...queue.splice(index, 1));
+    }
+    w.turn = {
+      queue: queue.length ? queue : ["narrator"],
+      spoken: false,
+      steps: 0,
+    };
+  }
   w.revision++;
   w.history.push(structuredClone(command));
   return w;
@@ -511,6 +716,13 @@ export function validateCommand(raw: unknown): asserts raw is Command {
     "角色标识错误。",
   );
   const fields: Record<string, string[]> = {
+    begin: [],
+    strike: ["target", "skill"],
+    say: ["target", "text"],
+    equip: ["weapon"],
+    take: ["item"],
+    use: ["item"],
+    npc_turn: ["npc", "choice", "text", "done", "source"],
     move: ["destination"],
     attack: ["target", "skill"],
     heal: ["target"],
@@ -546,11 +758,51 @@ export function validateCommand(raw: unknown): asserts raw is Command {
         Object.hasOwn(LOCATIONS, c.destination),
       "未知地点。",
     );
-  if (c.type === "attack")
+  if (c.type === "attack" || c.type === "strike")
     requireRule(
       typeof c.skill === "boolean" &&
-        ["king", "prince", "sentinel", "fallen"].includes(String(c.target)),
+        ["king", "prince", "sentinel", "fallen", "smith", "merchant"].includes(
+          String(c.target),
+        ),
       "攻击参数格式错误。",
+    );
+  const speakers = [
+    "king",
+    "prince",
+    "sentinel",
+    "fallen",
+    "smith",
+    "merchant",
+    "narrator",
+  ];
+  if (c.type === "say")
+    requireRule(
+      speakers.includes(String(c.target)) &&
+        typeof c.text === "string" &&
+        c.text.trim().length > 0 &&
+        c.text.length <= 2000,
+      "对话格式错误。",
+    );
+  if (c.type === "equip")
+    requireRule(
+      c.weapon === null ||
+        (typeof c.weapon === "string" && Object.hasOwn(WEAPONS, c.weapon)),
+      "武器格式错误。",
+    );
+  if (c.type === "take" || c.type === "use")
+    requireRule(
+      typeof c.item === "string" && c.item.length <= 100,
+      "物品格式错误。",
+    );
+  if (c.type === "npc_turn")
+    requireRule(
+      speakers.includes(String(c.npc)) &&
+        ["speak", "attack", "end"].includes(String(c.choice)) &&
+        typeof c.text === "string" &&
+        c.text.length <= 500 &&
+        typeof c.done === "boolean" &&
+        ["agent", "rules"].includes(String(c.source)),
+      "NPC 行动格式错误。",
     );
   if (c.type === "heal")
     requireRule(
@@ -578,4 +830,16 @@ export function replay(input: unknown): World {
     world = execute(world, raw);
   }
   return world;
+}
+
+/** Migration is an explicit replayable command; legacy combat keeps its original semantics. */
+export function ensureAdventure(world: World): World {
+  return world.playerId
+    ? world
+    : execute(world, {
+        type: "begin",
+        actor: "ranger",
+        expectedRevision: world.revision,
+        id: crypto.randomUUID(),
+      });
 }

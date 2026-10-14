@@ -1,5 +1,4 @@
 /** Node-only integration. Never import this module from the React application. */
-import { randomUUID } from "node:crypto";
 import {
   AgentLoop,
   AgentRuntime,
@@ -8,69 +7,12 @@ import {
 } from "42-agent";
 import type { ModelClient } from "42-agent";
 import { activeNpcs, execute } from "../../src/engine/engine";
-import { LOCATIONS, SKILLS } from "../../src/engine/content";
-import type { Command, HeroId, NpcId, World } from "../../src/engine/types";
+import type { HeroId, NpcId, World } from "../../src/engine/types";
 
-export interface ActionOption {
-  label: string;
-  command: Command;
-  costMinutes: number;
-}
+import { legalOptions } from "../../src/engine/actions";
+export { legalOptions } from "../../src/engine/actions";
 import type { Advice, Proposal } from "../../src/engine/advice";
 
-/** The host selects the actor. Neither the prompt nor the model can change ownership. */
-export function legalOptions(world: World, actor: HeroId): ActionOption[] {
-  const raw: { label: string; action: Record<string, unknown> }[] = [
-    ...Object.entries(LOCATIONS).map(([destination, place]) => ({
-      label: `前往${place.name}`,
-      action: { type: "move", destination },
-    })),
-    ...activeNpcs(world)
-      .filter((n) => n.relation !== "ally")
-      .flatMap((n) => [
-        {
-          label: `普通攻击：${n.name}`,
-          action: { type: "attack", target: n.id, skill: false },
-        },
-        {
-          label: `${SKILLS[actor]}：${n.name}`,
-          action: { type: "attack", target: n.id, skill: true },
-        },
-      ]),
-    ...world.heroes
-      .filter((h) => !h.retired && h.hp < h.maxHp)
-      .map((h) => ({
-        label: `治疗${h.name}`,
-        action: { type: "heal", target: h.id },
-      })),
-    ...(
-      [
-        ["inspect", "调查王座秘典"],
-        ["talk", "与王子交谈"],
-        ["cleanse", "净化王座"],
-        ["upgrade", "升级技能"],
-        ["rest", "篝火休整"],
-        ["travel", "穿越界隙"],
-        ["convert", "测试能量转换"],
-        ["wait", "等待一小时"],
-      ] as const
-    ).map(([type, label]) => ({ label, action: { type } })),
-  ];
-  return raw.flatMap(({ label, action }) => {
-    const command = {
-      ...action,
-      id: randomUUID(),
-      expectedRevision: world.revision,
-      actor,
-    } as Command;
-    try {
-      const next = execute(world, command);
-      return [{ label, command, costMinutes: next.minute - world.minute }];
-    } catch {
-      return [];
-    }
-  });
-}
 /** Player-facing observation: no RNG, remote NPC state, hidden intentions, or omniscient journal. */
 export function playerObservation(world: World, actor: HeroId) {
   const hero = world.heroes.find((h) => h.id === actor);
@@ -117,25 +59,12 @@ export function npcObservation(world: World, actor: NpcId) {
       .map((n) => ({ id: n.id, name: n.name, hp: n.hp })),
   });
 }
-function fallback(options: ActionOption[], reason: string): Advice {
-  // This is an explicit suggestion only: no action is auto-committed, even on failure.
-  const choice =
-    options.find((o) => o.command.type === "inspect") ??
-    options.find(
-      (o) => o.command.type === "move" && o.command.destination === "archive",
-    ) ??
-    options[0];
+function fallback(reason: string): Advice {
   return {
     mode: "fallback",
-    narration: "Agent 不可用，已返回本地规则建议。执行前仍需玩家确认。",
+    narration: "暂时无法理解这段行动。你可以使用场景中的行动选项，或稍后重试。",
     error: reason,
-    proposal: choice
-      ? {
-          ...choice,
-          reason: "依据可执行动作生成的本地兜底建议。",
-          source: "fallback",
-        }
-      : null,
+    proposal: null,
   };
 }
 export async function proposeAction(input: {
@@ -151,7 +80,7 @@ export async function proposeAction(input: {
   if (input.signal?.aborted) throw new Error("Decision cancelled");
   if (input.intent.length > 4000)
     throw new Error("Intent exceeds 4000 characters");
-  if (!input.model) return fallback(options, "未配置模型");
+  if (!input.model) return fallback("未配置模型");
   const observation = playerObservation(world, input.actor);
   let proposal: Proposal | null = null;
   const registry = new ToolRegistry();
@@ -241,10 +170,7 @@ export async function proposeAction(input: {
     };
   } catch (error) {
     if (input.signal?.aborted) throw error;
-    return fallback(
-      options,
-      error instanceof Error ? error.message : "Agent 执行失败",
-    );
+    return fallback(error instanceof Error ? error.message : "Agent 执行失败");
   } finally {
     await runtime.close();
   }
