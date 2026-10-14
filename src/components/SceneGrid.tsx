@@ -80,19 +80,12 @@ export default function SceneGrid({
           {nearby.map((npc) => (
             <button
               key={npc.id}
-              className={`tile npc-tile ${selected === npc.id ? "selected" : ""}`}
+              className={`tile npc-tile relation-${npc.relation} ${selected === npc.id ? "selected" : ""}`}
               aria-pressed={selected === npc.id}
+              aria-label={`${npc.name}，${npc.relation === "hostile" ? "敌对" : npc.relation === "ally" ? "友善／同阵营" : "中立"}，生命 ${npc.hp}/${npc.maxHp}`}
               disabled={busy}
               onClick={() => onSelect(npc.id)}
             >
-              <small>
-                {npc.relation === "hostile"
-                  ? "敌对"
-                  : npc.relation === "ally"
-                    ? "盟友"
-                    : "NPC"}
-                {selected === npc.id ? " · 已选中" : ""}
-              </small>
               <span>{npc.name}</span>
               <small>{`生命 ${npc.hp}/${npc.maxHp}`}</small>
             </button>

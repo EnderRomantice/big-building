@@ -9,15 +9,18 @@
 :root {
   font-family:
     -apple-system, BlinkMacSystemFont, "Noto Sans SC", "Segoe UI", sans-serif;
-  color: #282825;
-  background: #fafaf8;
+  color: #000;
+  background: #fff;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   font-weight: 400;
-  --muted: #767670;
-  --line: #e5e5df;
-  --accent: #dce97a;
+  --muted: #000;
+  --line: #000;
+  --accent: #000;
+  --hostile: #ff0000;
+  --ally: #00ff00;
+  --neutral: #ffff00;
 }
 * {
   box-sizing: border-box;
@@ -62,11 +65,11 @@ summary {
   outline-offset: 5px;
 }
 :focus-visible {
-  outline: 2px solid #767d37;
+  outline: 2px solid #000;
 }
 ::selection {
   background: var(--accent);
-  color: #282825;
+  color: #fff;
 }
 .page {
   width: min(100% - 64px, 1440px);
@@ -99,7 +102,7 @@ summary {
 }
 .quiet:hover,
 .text-button:hover {
-  color: #252521;
+  text-decoration: underline;
 }
 
 .workspace {
@@ -173,28 +176,37 @@ summary {
 }
 .tile small {
   font-size: 10px;
-  color: var(--muted);
+  color: inherit;
 }
 .tile:hover:not(:disabled) {
-  background: #f0f0ea;
-  border-color: #b8b8ac;
+  outline: 1px solid #000;
+  outline-offset: 2px;
 }
-.tile.current {
-  background: #edf0db;
-  border-color: #aab576;
-}
+.tile.current,
 .tile.selected {
-  border-color: #939b6a;
-  background: #f2f3e9;
+  border-style: dashed;
+}
+.npc-tile:disabled {
+  opacity: 1;
+}
+.npc-tile {
+  color: #000;
+  background: var(--relation-color);
+}
+.relation-hostile {
+  --relation-color: var(--hostile);
+}
+.relation-ally {
+  --relation-color: var(--ally);
+}
+.relation-neutral {
+  --relation-color: var(--neutral);
 }
 .map-tile {
   justify-content: center;
 }
 .object-grid {
   grid-template-columns: repeat(6, minmax(0, 1fr));
-}
-.object-tile {
-  border-style: dashed;
 }
 .scene-heading {
   display: flex;
@@ -263,7 +275,7 @@ summary {
 }
 .player-actions button:hover:not(:disabled),
 .inventory-list button:hover:not(:disabled) {
-  color: #6b7634;
+  text-decoration: underline;
 }
 .intent {
   margin-top: 24px;
@@ -274,12 +286,12 @@ summary {
   margin-bottom: 12px;
 }
 .intent form {
-  border: 1px solid #d8d8cf;
+  border: 1px solid #000;
   border-radius: 4px;
   padding: 12px;
 }
 .intent form:focus-within {
-  border-color: #96968a;
+  outline: 1px solid #000;
 }
 textarea {
   border: 0;
@@ -287,7 +299,7 @@ textarea {
   resize: vertical;
   width: 100%;
   min-height: 72px;
-  color: #33332e;
+  color: #000;
   line-height: 1.7;
   font-size: 13px;
   padding: 0;
@@ -296,7 +308,7 @@ textarea:focus-visible {
   outline: none;
 }
 textarea::placeholder {
-  color: #87877e;
+  color: #000;
 }
 .intent-footer {
   display: flex;
@@ -311,8 +323,9 @@ textarea::placeholder {
   margin-left: auto;
 }
 .primary-button {
-  background: #34362c;
-  color: #fafaf8;
+  border: 1px solid #000;
+  background: #000;
+  color: #fff;
   min-height: 36px;
   display: inline-flex;
   gap: 16px;
@@ -323,7 +336,8 @@ textarea::placeholder {
   font-size: 12px;
 }
 .primary-button:hover:not(:disabled) {
-  background: #4b4e3d;
+  background: #fff;
+  color: #000;
 }
 .text-button {
   display: inline-flex;
@@ -331,7 +345,7 @@ textarea::placeholder {
   gap: 8px;
   min-height: 36px;
   font-size: 12px;
-  color: #5f6150;
+  color: #000;
 }
 .hint {
   font-size: 11px;
@@ -345,7 +359,8 @@ textarea::placeholder {
 .notice {
   font-size: 12px;
   line-height: 1.8;
-  background: #efefe9;
+  background: #fff;
+  border: 1px solid #000;
   padding: 12px 14px;
   border-radius: 4px;
   overflow-wrap: anywhere;
@@ -356,7 +371,7 @@ textarea::placeholder {
   margin-top: 6px;
 }
 .error {
-  color: #985343;
+  color: #000;
 }
 .disclosure {
   font-size: 12px;
@@ -369,13 +384,13 @@ summary {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  color: #65655f;
+  color: #000;
 }
 summary::-webkit-details-marker {
   display: none;
 }
 summary:hover {
-  color: #252521;
+  text-decoration: underline;
 }
 .inventory,
 .history {
@@ -410,13 +425,13 @@ summary:hover {
 .journal-item p {
   font-size: 12px;
   line-height: 1.85;
-  color: #77776d;
+  color: #000;
   margin: 0;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 .dialogue-entry p {
-  color: #3b3b35;
+  color: #000;
   font-size: 13px;
 }
 .journal-item time {
@@ -436,7 +451,7 @@ summary:hover {
 .modal-backdrop {
   position: fixed;
   inset: 0;
-  background: #2a2a2530;
+  background: #00000030;
   backdrop-filter: blur(5px);
   display: grid;
   place-items: center;
@@ -447,9 +462,9 @@ summary:hover {
   width: min(100%, 440px);
   max-height: 85dvh;
   overflow-y: auto;
-  background: #fafaf8;
-  border: 1px solid #e0e0d7;
-  box-shadow: 0 16px 70px #30302015;
+  background: #fff;
+  border: 1px solid #000;
+  box-shadow: 0 16px 70px #00000015;
   border-radius: 10px;
   padding: 28px;
 }
@@ -477,7 +492,7 @@ summary:hover {
 .modal-copy {
   font-size: 12px;
   line-height: 1.9;
-  color: #75756b;
+  color: #000;
   margin: 19px 0;
 }
 .modal-actions {
@@ -502,7 +517,7 @@ summary:hover {
   font-size: 12px;
 }
 .menu-list button:hover {
-  color: #7b833b;
+  text-decoration: underline;
 }
 .menu-list button span {
   color: var(--muted);
@@ -511,7 +526,8 @@ summary:hover {
 .replace-confirm {
   font-size: 12px;
   line-height: 1.85;
-  background: #efefe8;
+  background: #fff;
+  border: 1px solid #000;
   border-radius: 5px;
   padding: 15px;
   margin-bottom: 16px;
