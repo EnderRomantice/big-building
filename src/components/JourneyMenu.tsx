@@ -1,3 +1,4 @@
+import { useMotionState } from "../game/motion";
 import { useRef, useState } from "react";
 import { clockText, dayText, replay, toReplay } from "../engine/engine";
 import type { World } from "../engine/types";
@@ -21,9 +22,9 @@ export default function JourneyMenu({
   onReset: () => void;
 }) {
   const file = useRef<HTMLInputElement>(null);
-  const [pending, setPending] = useState<World | null>(null);
-  const [reset, setReset] = useState(false);
-  const [message, setMessage] = useState("");
+  const [pending, setPending] = useMotionState<World | null>(null);
+  const [reset, setReset] = useMotionState(false);
+  const [message, setMessage] = useMotionState("");
   const [reading, setReading] = useState(false);
   async function importFile(selected?: File) {
     if (!selected) return;
@@ -96,7 +97,9 @@ export default function JourneyMenu({
           <p>
             {pending
               ? `已验证导入文件的 ${pending.history.length} 次行动。恢复后会替换当前进度。`
-              : "重新开始会替换当前进度。可以先导出，保留这段旅程。"}
+              : world.characterId
+                ? "重新开始会重置本世界的剧情、地点与物品；跨世界角色的等级、经验和技能树保留。"
+                : "重新开始会替换当前角色在这个剧本中的进度。可以先导出，保留这段旅程。"}
           </p>
           <div className="modal-actions">
             <button
@@ -120,14 +123,20 @@ export default function JourneyMenu({
       <details className="disclosure">
         <summary tabIndex={0}>如何游玩</summary>
         <p className="modal-copy">
-          你只控制艾琳。点击地图方格前往地点，再选择在场人物交谈或攻击。随身物品中可以更换手持武器、使用药草。
+          在 Home 选择剧本和角色，每个角色分别保存进度。右侧通过「场景 /
+          地图」切换内容。点击角色姓名或 NPC
+          查看详情；点击道路确认路程与耗时，抵达后才会知道陌生地点的名字。先选攻击或治疗，再选场景中的对象。友善人物也能攻击，但会降低好感。
         </p>
         <p className="modal-copy">
           每次行动后，在场 NPC
-          会自行决定说话、攻击或结束回合。受伤后可使用药草，或返回庭院休整。正午到来时，王子的计划也会继续。
+          会自行决定说话、攻击、离开或结束回合。随身物品可以更换武器、使用药草。
+          {world.campaign === "succession-v1"
+            ? "客栈可付费休整，医馆可以疗伤。寻找各地的师承与封存文书，七日后决定在登阙议会上支持谁。"
+            : "庭院可以休整；时间推进时，王子的计划也会继续。"}
         </p>
         <p className="modal-copy">
-          输入框用于直接对话，Enter 发送，Shift + Enter 换行。发送后会等待 NPC
+          输入框可以切换行动和说话；行动先识别并确认，说话直接作为台词发送。Enter
+          发送，Shift + Enter 换行。发送后会等待 NPC
           回应；取消则放弃整个未完成回合。模型不可用时，会明确标注规则回应。
         </p>
       </details>

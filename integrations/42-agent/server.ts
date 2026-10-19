@@ -8,6 +8,7 @@ import { pathToFileURL } from "node:url";
 import type { ModelClient } from "42-agent";
 import { replay } from "../../src/engine/engine";
 import type { HeroId } from "../../src/engine/types";
+import { DialogueError } from "./errors";
 import { runTurn } from "./turn";
 import { proposeAction } from "./adapter";
 import { createDeepSeekClient } from "./deepseek";
@@ -54,6 +55,7 @@ export function createLocalAgentServer(
     if (req.method === "GET" && req.url === "/api/agent/status")
       return json(res, 200, {
         available: Boolean(model),
+        busy,
         provider: model ? "DeepSeek" : "本地规则",
         runtime: "42-agent",
         model: model ? modelName : null,
@@ -83,6 +85,8 @@ export function createLocalAgentServer(
           command: body.command,
           model,
           signal: controller.signal,
+          onFailure: (diagnostic) =>
+            console.warn("[agent:turn]", JSON.stringify(diagnostic)),
         });
         return json(res, 200, result);
       }
@@ -109,7 +113,10 @@ export function createLocalAgentServer(
       json(res, 200, advice);
     } catch (error) {
       if (!controller.signal.aborted)
-        json(res, 400, {
+        json(res, error instanceof DialogueError ? 503 : 400, {
+          ...(error instanceof DialogueError
+            ? { code: error.failure.code }
+            : {}),
           error: error instanceof Error ? error.message : "无法生成建议。",
         });
     } finally {

@@ -67,4 +67,106 @@ describe("DeepSeek transport boundary", () => {
       client.complete({ systemPrompt: "", tools: [], messages: [] }),
     ).rejects.toThrow("凭据校验失败");
   });
+  it("forces the NPC action tool without forcing tools in the legacy advice flow", async () => {
+    const bodies: Record<string, unknown>[] = [];
+    const client = createDeepSeekClient({
+      apiKey: "dummy",
+      fetcher: async (_url, init) => {
+        bodies.push(JSON.parse(String(init?.body)));
+        return Response.json({
+          choices: [
+            {
+              message: {
+                content: "",
+                tool_calls: [
+                  {
+                    id: "npc",
+                    function: {
+                      name: "npc_action",
+                      arguments: '{"choice":"speak","text":"你好","done":true}',
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        });
+      },
+    });
+    const tool = {
+      name: "npc_action",
+      description: "回应",
+      inputSchema: { type: "object" },
+    };
+    await client.complete({ systemPrompt: "", messages: [], tools: [tool] });
+    await client.complete({
+      systemPrompt: "",
+      messages: [],
+      tools: [{ ...tool, name: "propose_action" }],
+    });
+    expect(bodies[0].tool_choice).toEqual({
+      type: "function",
+      function: { name: "npc_action" },
+    });
+    expect(bodies[0].thinking).toEqual({ type: "disabled" });
+    expect(bodies[1].tool_choice).toBeUndefined();
+    await client.complete({
+      systemPrompt: "",
+      messages: [],
+      tools: [
+        { ...tool, name: "npc_speak" },
+        { ...tool, name: "npc_end" },
+      ],
+    });
+    expect(bodies[2].tool_choice).toBe("required");
+  });
+  it("classifies network, quota, rate limit and malformed responses without leaking provider data", async () => {
+    const request = { systemPrompt: "", tools: [], messages: [] };
+    for (const [status, code, retryable] of [
+      [402, "quota", false],
+      [429, "rate_limit", true],
+      [503, "service", true],
+    ] as const) {
+      const client = createDeepSeekClient({
+        apiKey: "dummy",
+        fetcher: async () => new Response("private", { status }),
+      });
+      await expect(client.complete(request)).rejects.toMatchObject({
+        code,
+        retryable,
+      });
+    }
+    const network = createDeepSeekClient({
+      apiKey: "dummy",
+      fetcher: async () => {
+        throw new Error("private-network-detail");
+      },
+    });
+    await expect(network.complete(request)).rejects.toMatchObject({
+      code: "network",
+      retryable: true,
+    });
+    const malformed = createDeepSeekClient({
+      apiKey: "dummy",
+      fetcher: async () =>
+        Response.json({
+          choices: [
+            {
+              message: {
+                tool_calls: [
+                  {
+                    id: "c",
+                    function: { name: "npc_action", arguments: "{broken" },
+                  },
+                ],
+              },
+            },
+          ],
+        }),
+    });
+    await expect(malformed.complete(request)).rejects.toMatchObject({
+      code: "invalid_response",
+      retryable: true,
+    });
+  });
 });

@@ -1,3 +1,4 @@
+import { InferenceError } from "./errors";
 import { AdaptedModelClient } from "42-agent/provider";
 import type { ModelClient, ModelRequest, ToolCall } from "42-agent";
 interface ChatMessage {
@@ -11,6 +12,7 @@ interface ChatRequest {
   model: string;
   messages: ChatMessage[];
   tools: unknown[];
+  tool_choice?: "required" | { type: "function"; function: { name: string } };
   stream: false;
   max_tokens: number;
   thinking: { type: "disabled" };
@@ -33,36 +35,49 @@ export function createDeepSeekClient(config: {
   model?: string;
   fetcher?: typeof fetch;
 }): ModelClient {
-  if (!config.apiKey) throw new Error("缺少 DeepSeek 凭据。");
+  if (!config.apiKey) throw new InferenceError("missing_key");
   const model = config.model ?? "deepseek-flash";
   const client = new AdaptedModelClient<ChatRequest, ChatResponse, never>(
     {
       async complete(body, signal) {
-        const response = await (config.fetcher ?? fetch)(
-          "https://api.deepseek.com/chat/completions",
-          {
-            method: "POST",
-            signal,
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${config.apiKey}`,
+        let response: Response;
+        try {
+          response = await (config.fetcher ?? fetch)(
+            "https://api.deepseek.com/chat/completions",
+            {
+              method: "POST",
+              signal,
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${config.apiKey}`,
+              },
+              body: JSON.stringify(body),
             },
-            body: JSON.stringify(body),
-          },
-        );
+          );
+        } catch (error) {
+          if (signal?.aborted) throw error;
+          throw new InferenceError("network", true);
+        }
         if (!response.ok) {
           await response.body?.cancel();
-          throw new Error(
-            response.status === 401
-              ? "DeepSeek 凭据校验失败。"
-              : response.status === 402
-                ? "DeepSeek 账户额度不足。"
-                : response.status === 429
-                  ? "DeepSeek 请求频率受限，请稍后再试。"
-                  : `DeepSeek 服务暂不可用（HTTP ${response.status}）。`,
+          const status = response.status;
+          throw new InferenceError(
+            status === 401 || status === 403
+              ? "auth"
+              : status === 402
+                ? "quota"
+                : status === 429
+                  ? "rate_limit"
+                  : "service",
+            status === 429 || status >= 500,
           );
         }
-        return (await response.json()) as ChatResponse;
+        try {
+          return (await response.json()) as ChatResponse;
+        } catch (error) {
+          if (signal?.aborted) throw error;
+          throw new InferenceError("invalid_response", true);
+        }
       },
     },
     {
@@ -104,6 +119,17 @@ export function createDeepSeekClient(config: {
           stream: false,
           thinking: { type: "disabled" },
           max_tokens: 1024,
+          ...(request.tools.some((t) => t.name === "npc_end")
+            ? { tool_choice: "required" as const }
+            : request.tools.length === 1 &&
+                request.tools[0].name === "npc_action"
+              ? {
+                  tool_choice: {
+                    type: "function" as const,
+                    function: { name: "npc_action" },
+                  },
+                }
+              : {}),
           tools: request.tools.map((t) => ({
             type: "function",
             function: {
@@ -115,20 +141,26 @@ export function createDeepSeekClient(config: {
         };
       },
       fromProviderResponse(response) {
-        const choice = response.choices?.[0];
-        if (!choice?.message || choice.finish_reason === "length")
-          throw new Error("DeepSeek 返回了不完整的建议，请重试。");
-        return {
-          content: choice.message.content ?? "",
-          toolCalls: choice.message.tool_calls?.map((c) => ({
-            id: c.id,
-            name: c.function.name,
-            arguments: JSON.parse(c.function.arguments) as Record<
-              string,
-              unknown
-            >,
-          })),
-        };
+        try {
+          const choice = response.choices?.[0];
+          if (!choice?.message || choice.finish_reason === "length")
+            throw new Error("Incomplete response");
+          return {
+            content: choice.message.content ?? "",
+            toolCalls: choice.message.tool_calls?.map((c) => {
+              const args: unknown = JSON.parse(c.function.arguments);
+              if (!args || typeof args !== "object" || Array.isArray(args))
+                throw new Error("Invalid arguments");
+              return {
+                id: c.id,
+                name: c.function.name,
+                arguments: args as Record<string, unknown>,
+              };
+            }),
+          };
+        } catch {
+          throw new InferenceError("invalid_response", true);
+        }
       },
       fromProviderStreamEvent() {
         return null;

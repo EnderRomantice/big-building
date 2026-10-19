@@ -1,3 +1,4 @@
+import { majorAvailable, usableNpcSkills } from "./careerCombat";
 import { activeNpcs, execute } from "./engine";
 import type { Command, World } from "./types";
 export type NpcTurn = Extract<Command, { type: "npc_turn" }>;
@@ -35,7 +36,10 @@ export function npcCommand(
 }
 export function ruleDecision(world: World): TurnDecision {
   const npc = activeNpcs(world).find((n) => n.id === world.turn?.queue[0]);
-  if (npc?.relation === "hostile")
+  if (
+    npc?.relation === "hostile" &&
+    (!world.careersVersion || majorAvailable(world))
+  )
     return { choice: "attack", text: "", done: true };
   return {
     choice: "end",
@@ -47,11 +51,44 @@ export function ruleDecision(world: World): TurnDecision {
     done: true,
   };
 }
+/** Deterministic fallback uses the same skills and major-action budget as model tools. */
+export function fallbackCommand(world: World): Command {
+  const npc = activeNpcs(world).find((n) => n.id === world.turn?.queue[0]);
+  if (npc?.career && npc.relation === "hostile" && majorAvailable(world)) {
+    const skills = usableNpcSkills(world, npc).filter((s) => s.usable);
+    const heal =
+      npc.hp < npc.maxHp / 2
+        ? skills.find((s) => s.kind === "heal" && s.targets.includes(npc.id))
+        : undefined;
+    const attack = skills
+      .filter((s) => s.kind === "attack")
+      .sort((a, b) => b.power - a.power)[0];
+    const chosen = heal ?? attack;
+    const base = {
+      id: crypto.randomUUID(),
+      expectedRevision: world.revision,
+      actor: world.playerId!,
+      type: "npc_step" as const,
+      npc: npc.id,
+    };
+    if (chosen)
+      return {
+        ...base,
+        action: "cast",
+        skill: chosen.id,
+        target: chosen.kind === "heal" ? npc.id : world.playerId!,
+        intent: heal ? "先疗伤，保留后续进攻机会。" : "用可用的职业技能施压。",
+      };
+    if (npc.energy < 5)
+      return { ...base, action: "recover", intent: "气力不足，先调息再进攻。" };
+  }
+  return npcCommand(world, ruleDecision(world), "rules");
+}
 /** Used when the provider fails, still enforcing the same turn rules. */
 export function finishByRules(world: World): Command[] {
   const commands: Command[] = [];
   while (world.turn?.queue.length) {
-    const command = npcCommand(world, ruleDecision(world), "rules");
+    const command = fallbackCommand(world);
     world = execute(world, command);
     commands.push(command);
   }

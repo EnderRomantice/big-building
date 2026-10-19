@@ -7,6 +7,9 @@ import {
 } from "../engine/engine";
 import type { Command, HeroId, JournalEntry, World } from "../engine/types";
 
+export function journeySlot(world: World) {
+  return `big-building:slot:${world.campaign ?? "crown"}:${world.characterId ?? world.initialHero ?? world.playerId ?? "ranger"}`;
+}
 export const SAVE_KEY = "big-building:journey:v1";
 export interface Journey {
   world: World;
@@ -52,7 +55,7 @@ export function journeyReducer(state: Journey, event: JourneyEvent): Journey {
     if (event.session !== state.session)
       throw new Error("旅程已更换，请重新选择行动。");
     const commands = event.type === "batch" ? event.commands : [event.command];
-    if (!commands.length || commands.length > 9)
+    if (!commands.length || commands.length > 43)
       throw new Error("回合记录格式错误。");
     let world = state.world;
     for (const command of commands) {

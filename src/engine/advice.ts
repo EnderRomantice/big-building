@@ -4,6 +4,8 @@ export interface Proposal {
   reason: string;
   label: string;
   costMinutes: number;
+  energyCost?: number;
+  confirmation?: string;
   source: "42-agent" | "fallback";
 }
 export interface Advice {
